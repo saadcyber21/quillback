@@ -158,6 +158,15 @@ class Finding:
     cwe: int | None = None
     #: Free-form tags for filtering, e.g. {"rag", "finance"}.
     tags: frozenset[str] = frozenset()
+    #: Where to point a reviewer, as a repo-relative artifact URI.
+    #:
+    #: Set by the runner from the target's defining source file when the attack
+    #: does not name one itself. Not optional in practice: GitHub code scanning
+    #: rejects any result without a physical location, so a finding with no
+    #: location cannot be uploaded at all.
+    location: str | None = None
+    #: Line within ``location`` when the finding is tied to a specific line.
+    line: int | None = None
 
     def __post_init__(self) -> None:
         # Import here rather than at module level: asi.py does not import
