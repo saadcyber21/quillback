@@ -42,6 +42,14 @@ class Attack(ABC):
     #: Hooks this attack needs. The runner skips it if any are missing, so the
     #: attack body can assume they exist.
     requires: tuple[str, ...] = ()
+    #: Repo-relative path of the artifact this attack inspects, when it is a
+    #: static one. Leave unset for behavioural attacks and the runner falls back
+    #: to the file defining the target scaffold.
+    #:
+    #: GitHub code scanning rejects any result without a physical location, so
+    #: every finding ends up with one — the only question is whether it points
+    #: at something meaningful.
+    source_file: str | None = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Validate concrete subclasses at import time.
@@ -80,6 +88,8 @@ class Attack(ABC):
         severity: Severity | None = None,
         cwe: int | None = None,
         tags: frozenset[str] | None = None,
+        location: str | None = None,
+        line: int | None = None,
     ) -> Finding:
         """Build a Finding pre-filled with this attack's identity.
 
@@ -97,6 +107,8 @@ class Attack(ABC):
             recommendation=recommendation,
             cwe=cwe,
             tags=frozenset(self.tags | (tags or frozenset())),
+            location=location or self.source_file,
+            line=line,
         )
 
     @staticmethod
