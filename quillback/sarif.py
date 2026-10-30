@@ -119,20 +119,16 @@ def _result(finding: Finding) -> dict[str, Any]:
                 f"Remediation: {finding.recommendation}"
             )
         },
-        # quillback findings are behavioural, not tied to a source line. A
-        # single logical location keeps GitHub happy without inventing a
-        # filename that does not exist.
-        "locations": [
-            {
-                "logicalLocations": [
-                    {
-                        "name": finding.asi,
-                        "kind": "module",
-                        "fullyQualifiedName": f"{finding.asi}:{category.name}",
-                    }
-                ]
-            }
-        ],
+        # GitHub code scanning rejects any result without a PHYSICAL location
+        # ("expected a physical location"), which is not obvious from the spec
+        # and not caught by validating the document against it. The upload
+        # succeeds and the analysis then fails server-side, so the only symptom
+        # is a red step with no findings in the Security tab.
+        #
+        # Findings are anchored to the file defining the target scaffold — a real
+        # file, and the right place to send a reviewer. The logical location is
+        # kept alongside it so the ASI category is still queryable.
+        "locations": [_physical_location(finding)],
         "properties": {
             "severity": finding.severity.value,
             "owasp-asi": finding.asi,
@@ -157,6 +153,37 @@ def _result(finding: Finding) -> dict[str, Any]:
         "primaryLocationLineHash": _fingerprint(finding)
     }
     return result
+
+
+def _physical_location(finding: Finding) -> dict[str, Any]:
+    """A location block code scanning will accept.
+
+    Falls back to a synthetic-but-stable path when no artifact is known, because
+    a missing physical location makes the whole upload fail rather than dropping
+    one result. An obviously synthetic name is deliberate: it should look wrong
+    in the UI, not pass for a real file.
+    """
+    uri = finding.location or f"{finding.asi}/{finding.attack_id}.quillback"
+    region: dict[str, Any] = {"startLine": finding.line or 1}
+    return {
+        "physicalLocation": {
+            "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
+            "region": region,
+        },
+        "logicalLocations": [
+            {
+                "name": finding.asi,
+                "kind": "module",
+                "fullyQualifiedName": f"{finding.asi}:{_asi_name(finding.asi)}",
+            }
+        ],
+    }
+
+
+def _asi_name(code: str) -> str:
+    from .asi import get as _get
+
+    return _get(code).name
 
 
 def _step_dict(step: Any) -> dict[str, Any]:
@@ -222,6 +249,7 @@ def _fingerprint(finding: Finding) -> str:
             finding.attack_id,
             finding.asi,
             finding.title,
+            finding.location or "",
             "->".join(finding.call_chain),
             ">>".join(s.detail for s in finding.evidence),
         ]
