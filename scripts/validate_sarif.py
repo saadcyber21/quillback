@@ -75,6 +75,7 @@ def validate(path: Path) -> list[str]:
 
     results = run.get("results") or []
     fingerprints: dict[str, str] = {}
+    locations_seen: set[str] = set()
     for i, res in enumerate(results):
         rid = res.get("ruleId")
         if rid not in rule_ids:
@@ -83,6 +84,34 @@ def validate(path: Path) -> list[str]:
             problems.append(f"result[{i}] has invalid level {res.get('level')!r}")
         if not res.get("message", {}).get("text"):
             problems.append(f"result[{i}] has no message text")
+
+        # Code scanning requires a physical location on every result. Without
+        # one the upload still succeeds and the analysis fails server-side, so
+        # the only symptom is an empty Security tab. This check exists because
+        # the exporter shipped a version that omitted it and this validator
+        # waved it through.
+        locations = res.get("locations") or []
+        physical = [
+            loc for loc in locations if isinstance(loc, dict) and loc.get("physicalLocation")
+        ]
+        if not physical:
+            problems.append(
+                f"result[{i}] ({rid}) has no physical location — code scanning "
+                f"rejects the whole file with 'expected a physical location'"
+            )
+        else:
+            uri = (
+                physical[0]["physicalLocation"]
+                .get("artifactLocation", {})
+                .get("uri")
+            )
+            if not uri:
+                problems.append(f"result[{i}] ({rid}): physical location has no artifact uri")
+            region = physical[0]["physicalLocation"].get("region") or {}
+            if not isinstance(region.get("startLine"), int) or region["startLine"] < 1:
+                problems.append(
+                    f"result[{i}] ({rid}): region.startLine must be a positive integer"
+                )
 
         fp = (res.get("partialFingerprints") or {}).get("primaryLocationLineHash")
         if not fp:
