@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quillback"
+version = "0.1.0"
+description = "Offline red-team harness for AI agent scaffolds. No API keys, no tokens, deterministic."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = [
+  "security",
+  "red-team",
+  "llm",
+  "ai-agents",
+  "prompt-injection",
+  "owasp",
+  "sarif",
+  "appsec",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Topic :: Software Development :: Testing",
+]
+
+# Deliberately empty. Zero runtime dependencies is a feature, not an omission:
+# it is what lets this run in a locked-down CI runner without a dependency
+# review. Do not add one without a strong reason.
+dependencies = []
+
+[project.optional-dependencies]
+# Optional, and only for development. Nothing here is needed to run a scan.
+dev = []
+
+[project.urls]
+Homepage = "https://github.com/saadcyber21/quillback"
+Repository = "https://github.com/saadcyber21/quillback"
+Issues = "https://github.com/saadcyber21/quillback/issues"
+
+[project.scripts]
+quillback = "quillback.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["quillback*"]
+
+[tool.setuptools.package-data]
+quillback = ["py.typed"]

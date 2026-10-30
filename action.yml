@@ -1,0 +1,116 @@
+name: quillback agent scaffold scan
+description: >-
+  Red-team an AI agent scaffold offline and upload findings to the Security tab.
+  No API keys, no tokens, deterministic results.
+author: quillback
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  target:
+    description: >-
+      Import path to a quillback.Scaffold subclass or instance, as
+      'package.module:Attribute'. Required unless 'demo' is true.
+    required: false
+  demo:
+    description: Scan the bundled deliberately-vulnerable reference agent instead.
+    required: false
+    default: "false"
+  fail-on:
+    description: >-
+      Fail the build when findings reach this severity:
+      any | critical | high | medium | none.
+    required: false
+    default: "high"
+  asi:
+    description: Space-separated ASI category codes to restrict the scan to.
+    required: false
+    default: ""
+  exclude:
+    description: Space-separated attack ids to skip.
+    required: false
+    default: ""
+  python-version:
+    description: Python version to run under.
+    required: false
+    default: "3.12"
+  working-directory:
+    description: Directory to run from, when the target is not at the repo root.
+    required: false
+    default: "."
+
+outputs:
+  findings:
+    description: Number of findings produced.
+    value: ${{ steps.scan.outputs.findings }}
+  sarif-file:
+    description: Path to the generated SARIF file.
+    value: ${{ steps.scan.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # Installed from the pinned ref rather than the checkout, so a PR cannot
+    # modify the scanner that is scanning it.
+    - name: Install quillback
+      shell: bash
+      run: python -m pip install --quiet "git+https://github.com/saadcyber21/quillback@v0.1.0"
+
+    - name: Scan
+      id: scan
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        QB_TARGET: ${{ inputs.target }}
+        QB_DEMO: ${{ inputs.demo }}
+        QB_FAIL_ON: ${{ inputs.fail-on }}
+        QB_ASI: ${{ inputs.asi }}
+        QB_EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        set -euo pipefail
+
+        ARGS=(scan --format sarif --quiet --out quillback-results.sarif --fail-on "$QB_FAIL_ON")
+
+        if [ "$QB_DEMO" = "true" ]; then
+          ARGS+=(--demo)
+        elif [ -n "$QB_TARGET" ]; then
+          ARGS+=(--target "$QB_TARGET")
+        else
+          echo "::error::set either 'target' or 'demo: true'"
+          exit 2
+        fi
+
+        # shellcheck disable=SC2206 # intentional word splitting of user lists
+        [ -n "$QB_ASI" ]     && ARGS+=(--asi $QB_ASI)
+        [ -n "$QB_EXCLUDE" ] && ARGS+=(--exclude $QB_EXCLUDE)
+
+        set +e
+        python -m quillback "${ARGS[@]}"
+        code=$?
+        set -e
+
+        # Exit 2 means the scan itself broke. That must fail loudly rather than
+        # being absorbed, or a broken scan reads as a clean one.
+        if [ "$code" = "2" ]; then
+          echo "::error::quillback scan errored (exit 2) — results are incomplete"
+          exit 2
+        fi
+
+        echo "sarif-file=quillback-results.sarif" >> "$GITHUB_OUTPUT"
+        echo "findings=$(python -c "import json;print(len(json.load(open('quillback-results.sarif'))['runs'][0]['results']))")" >> "$GITHUB_OUTPUT"
+        exit "$code"
+
+    - name: Upload SARIF
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.working-directory }}/quillback-results.sarif
+        category: quillback
+        # Do not block the PR on upload failure — a Security tab outage should
+        # not take down someone's CI.
+        ignore-file: true

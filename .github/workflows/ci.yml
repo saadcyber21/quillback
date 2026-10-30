@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref. Scans are cheap but there is no
+# reason to finish a commit that has already been replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest supported through newest. The project claims >=3.10, so 3.10
+        # must actually be exercised — claiming support you do not test is how
+        # "requires-python" becomes a lie.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # No install step for dependencies: there are none. The package is run
+      # straight from the checkout, which also proves it does not secretly
+      # depend on something installed.
+      - name: Run test suite
+        run: python tests/run_tests.py
+
+      - name: Verify the vulnerable reference agent still fails
+        # If this ever exits 0, an attack has silently stopped detecting the
+        # thing it was written to detect. That regression is invisible in every
+        # other check, so it gets its own step.
+        run: |
+          set +e
+          python -m quillback scan --demo --format json --quiet --out /tmp/demo.json
+          code=$?
+          set -e
+          echo "exit code: $code"
+          if [ "$code" != "1" ]; then
+            echo "::error::expected findings against the vulnerable reference agent (exit 1), got $code"
+            exit 1
+          fi
+
+      - name: Verify the hardened reference agent is clean
+        # The mirror of the above. Guards against an attack regressing into a
+        # false-positive generator, which is the failure mode that destroys
+        # trust in a security tool.
+        run: python - <<'PY'
+          import sys
+          from quillback.demo import HardenedSupportAgent
+          from quillback.runner import run_scan
+
+          report = run_scan(HardenedSupportAgent())
+          if report.findings:
+              for f in report.findings:
+                  print(f"::error::false positive: {f.attack_id} — {f.title}")
+              sys.exit(1)
+          if report.failed_attacks:
+              for r in report.failed_attacks:
+                  print(f"::error::attack raised: {r.attack_id} — {r.error}")
+              sys.exit(1)
+          print("hardened reference agent: 0 findings, 0 errors")
+          PY
+
+  sarif:
+    name: sarif validity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to upload to the Security tab. Scoped to this job only.
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate SARIF
+        run: python -m quillback scan --demo --format sarif --quiet --out results.sarif
+
+      - name: Validate structure
+        run: python - <<'PY'
+          import json, sys
+
+          doc = json.load(open("results.sarif"))
+          assert doc["version"] == "2.1.0", "wrong SARIF version"
+          run = doc["runs"][0]
+          rules = {r["id"] for r in run["tool"]["driver"]["rules"]}
+          assert rules, "no rules declared"
+          for res in run["results"]:
+              assert res["ruleId"] in rules, f"undeclared rule {res['ruleId']}"
+              assert res["level"] in {"none", "note", "warning", "error"}
+          print(f"valid: {len(run['results'])} results against {len(rules)} rules")
+          PY
+
+      - name: Upload to code scanning
+        # Only on the default branch and only for pushes, so PRs from forks
+        # cannot write to the Security tab.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: quillback-self-scan
