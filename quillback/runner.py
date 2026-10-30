@@ -14,7 +14,9 @@ That is why the exit code distinguishes 1 (findings) from 2 (scan broke).
 
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
 from typing import Callable, Iterable
 
 from . import __version__
@@ -30,6 +32,25 @@ ProgressHook = Callable[[Attack, int, int], None]
 
 class ScanAborted(Exception):
     """Raised when the target itself cannot be used."""
+
+
+def target_artifact(scaffold: Scaffold) -> str | None:
+    """Repo-relative path of the file defining ``scaffold``'s class.
+
+    Used as the default physical location for findings. It is a real file, it
+    is where the scaffold's own logic lives, and it is the right place to send a
+    reviewer for anything the permission gate or planner got wrong.
+    """
+    module = sys.modules.get(type(scaffold).__module__)
+    path = getattr(module, "__file__", None)
+    if not path:
+        return None
+    try:
+        return str(Path(path).resolve().relative_to(Path.cwd().resolve()))
+    except ValueError:
+        # Outside the working directory (e.g. an installed package). Fall back
+        # to the dotted module path so the location is still stable and unique.
+        return type(scaffold).__module__.replace(".", "/") + ".py"
 
 
 def run_scan(
@@ -103,6 +124,11 @@ def run_scan(
             if fail_fast:
                 raise
             continue
+
+        default_location = target_artifact(scaffold)
+        for finding in findings:
+            if not finding.location:
+                finding.location = default_location
 
         report.results.append(
             AttackResult(
