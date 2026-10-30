@@ -59,7 +59,7 @@ jobs:
         # The mirror of the above. Guards against an attack regressing into a
         # false-positive generator, which is the failure mode that destroys
         # trust in a security tool.
-        run: python - <<'PY'
+        run: |
           import sys
           from quillback.demo import HardenedSupportAgent
           from quillback.runner import run_scan
@@ -93,7 +93,7 @@ jobs:
         run: python -m quillback scan --demo --format sarif --quiet --out results.sarif
 
       - name: Validate structure
-        run: python - <<'PY'
+        run: |
           import json, sys
 
           doc = json.load(open("results.sarif"))
