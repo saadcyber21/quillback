@@ -118,6 +118,75 @@ def test_fingerprints_are_stable_across_runs() -> None:
     assert fp(first) == fp(second), "fingerprints changed between identical scans"
 
 
+def test_every_result_has_a_physical_location() -> None:
+    """GitHub code scanning rejects the whole file without one.
+
+    Regression test. The exporter originally emitted only logicalLocations,
+    which is valid SARIF and reads as sufficient. The upload then succeeded and
+    the analysis failed server-side with 'expected a physical location' repeated
+    per result, so the symptom was an empty Security tab and a red step with no
+    useful message. The project's own validator passed the document, because it
+    checked the spec rather than what the consumer enforces.
+    """
+    doc = to_sarif(run_scan(VulnerableSupportAgent()))
+
+    for result in doc["runs"][0]["results"]:
+        locations = result.get("locations") or []
+        physical = [
+            loc for loc in locations if loc.get("physicalLocation")
+        ]
+        assert physical, f"{result['ruleId']}: no physical location"
+
+        pl = physical[0]["physicalLocation"]
+        assert pl["artifactLocation"]["uri"], f"{result['ruleId']}: no artifact uri"
+        start = pl["region"]["startLine"]
+        assert isinstance(start, int) and start >= 1, (
+            f"{result['ruleId']}: startLine must be a positive int, got {start!r}"
+        )
+
+
+def test_findings_are_anchored_to_a_real_file() -> None:
+    """The default location must be the target's own source file.
+
+    Anchoring to a synthetic path would upload fine and then point a reviewer at
+    a file that does not exist, which is worse than no location.
+    """
+    from pathlib import Path
+
+    report = run_scan(VulnerableSupportAgent())
+    for finding in report.findings:
+        assert finding.location, f"{finding.attack_id}: no location"
+        assert Path(finding.location).exists(), (
+            f"{finding.attack_id}: location {finding.location!r} is not a real file"
+        )
+
+
+def test_validator_script_rejects_a_missing_physical_location(tmp_path=None) -> None:
+    """The standalone validator must catch what GitHub catches."""
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    doc = to_sarif(run_scan(VulnerableSupportAgent()))
+    del doc["runs"][0]["results"][0]["locations"]
+
+    bad = root / "broken.sarif.tmp"
+    bad.write_text(json.dumps(doc), encoding="utf-8")
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(root / "scripts" / "validate_sarif.py"), str(bad)],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 1, (
+            f"validator accepted a document code scanning would reject:\n{proc.stdout}"
+        )
+        assert "physical location" in proc.stdout
+    finally:
+        bad.unlink(missing_ok=True)
+
+
 def test_sarif_serialises_to_valid_json() -> None:
     text = dumps(run_scan(VulnerableSupportAgent()))
     parsed = json.loads(text)  # must not raise
