@@ -1,0 +1,20 @@
+# CITATION.cff — makes the harness formally citable. Enable Zenodo:
+# zenodo.org → GitHub → flip the switch for saadcyber21/quillback, then tag a
+# release to mint a DOI that papers can cite.
+cff-version: 1.2.0
+message: "If you use quillback in research or a published pipeline, please cite it as below."
+title: "quillback: an offline, deterministic red-team harness for AI agent scaffolds"
+authors:
+  - family-names: Saad
+    given-names: MD
+    alias: saadcyber21
+version: 0.1.0
+date-released: "2026-10-30"
+license: MIT
+repository-code: "https://github.com/saadcyber21/quillback"
+keywords:
+  - ai-agents
+  - red-team
+  - prompt-injection
+  - owasp-asi
+  - sarif
